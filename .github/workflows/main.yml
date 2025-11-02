@@ -23,10 +23,15 @@ jobs:
       - name: Build
         run: npm run build
 
+      # GitHub Actions의 GITHUB_TOKEN으로는 외부 저장소 접근 권한이 없습니다.
+      # 따라서, 외부 저장소에 push할 수 있는 Personal Access Token(PAT)이 필요합니다.
+      # 개인 액세스 토큰을 발급받아, 외부 저장소에 write 권한을 부여하고 키를 저장소의 secrets에 생성(예: GH_PAGES_DEPLOY_TOKEN)하세요.
+      # 아래 personal_token 값을 ${{ secrets.GH_PAGES_DEPLOY_TOKEN }}으로 변경하세요.
+
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
-          personal_token: ${{ secrets.GITHUB_TOKEN }}
+          personal_token: ${{ secrets.GH_TOKEN }}
           external_repository: kkn1125/gantt-chart
           publish_branch: gh-pages
           publish_dir: ./dist
