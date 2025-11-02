@@ -23,23 +23,8 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Checkout target repo
-        uses: actions/checkout@v4
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          repository: kkn1125/gantt-chart
-          token: ${{ secrets.GH_TOKEN }}
-          path: dist
-
-      - name: Copy build files
-        run: |
-          rm -rf dist/*
-          cp -r dist/* dist/
-
-      - name: Commit & Push
-        run: |
-          cd dist
-          git config user.name 'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add .
-          git commit -m "Deploy from source repo"
-          git push origin main
+          personal_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
