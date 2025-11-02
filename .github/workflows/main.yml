@@ -1,0 +1,45 @@
+name: Deploy to Another Repository
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          repository: kkn1125/gantt-chart
+          token: ${{ secrets.GH_TOKEN }}
+          path: dist
+
+      - name: Copy build files
+        run: |
+          rm -rf dist/*
+          cp -r dist/* dist/
+
+      - name: Commit & Push
+        run: |
+          cd dist
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add .
+          git commit -m "Deploy from source repo"
+          git push origin main

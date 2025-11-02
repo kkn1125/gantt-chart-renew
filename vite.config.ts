@@ -9,6 +9,7 @@ const ReactCompilerConfig = {
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: "/gantt-chart/",
   plugins: [
     react({
       // @ts-ignore

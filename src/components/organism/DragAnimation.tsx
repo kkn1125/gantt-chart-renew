@@ -1,113 +1,188 @@
+import { useEditorStore } from "@/store/editor.store";
 import { useGanttStore } from "@/store/gantt.store";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+type Rect = { left: number; right: number; top: number; bottom: number };
+type SizeRect = { top: number; left: number; width: number; height: number };
+type CellRect = { id: string; rect: Rect };
+
+function intersects(a: Rect, b: Rect) {
+  return (
+    a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+  );
+}
 
 interface DragAnimationProps {}
 const DragAnimation: React.FC<DragAnimationProps> = () => {
-  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(
-    null
-  );
-  const [dragMove, setDragMove] = useState<{ x: number; y: number } | null>(
-    null
-  );
-  const [dragging, setDragging] = useState(false);
   const getAllCells = useGanttStore((state) => state.getAllCells);
-  const setSelectCells = useGanttStore((state) => state.setSelectCells);
-  const clearSelectedCells = useGanttStore((state) => state.clearSelectedCells);
+  const patchSelection = useGanttStore((state) => state.patchSelection);
+  const clearSelection = useGanttStore((state) => state.clearSelection);
+  const draggingRef = useRef(false);
+  const anchorRef = useRef<{ x: number; y: number } | null>(null);
+  const mouseRef = useRef<{ x: number; y: number } | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const isPressedKey = useEditorStore((state) => state.isPressedKey);
 
-  const moveX = dragMove?.x || 0;
-  const moveY = dragMove?.y || 0;
-  const startX = dragStart?.x || 0;
-  const startY = dragStart?.y || 0;
+  // 측정 캐시: mousedown 때 1회
+  const cellRectsRef = useRef<CellRect[]>([]);
+  const prevSetRef = useRef<Set<string>>(new Set());
 
-  const width = moveX - startX;
-  const height = moveY - startY;
+  const [box, setBox] = useState<SizeRect | null>(null);
+  const [classes, setClasses] = useState({
+    side1: "border-solid",
+    side2: "border-green-300 bg-green-200/40",
+  });
 
-  const handleMouseDragStart = useEffectEvent((e: MouseEvent) => {
-    // 좌클릭만 시작
-    if ((e.target as HTMLElement)?.closest?.('[data-sidebar="sidebar"]')) {
-      return;
+  const measureAllCells = () => {
+    const cells = getAllCells(); // id, element 포함
+    cellRectsRef.current = cells
+      .filter((c) => c.element)
+      .map((c) => {
+        const r = c.element!.getBoundingClientRect();
+        return {
+          id: c.id,
+          rect: { left: r.left, right: r.right, top: r.top, bottom: r.bottom },
+        };
+      });
+  };
+
+  const computeDragRect = (): Rect | null => {
+    if (!anchorRef.current || !mouseRef.current) return null;
+    const { x: x1, y: y1 } = anchorRef.current;
+    const { x: x2, y: y2 } = mouseRef.current;
+    return {
+      left: Math.min(x1, x2),
+      right: Math.max(x1, x2),
+      top: Math.min(y1, y2),
+      bottom: Math.max(y1, y2),
+    };
+  };
+
+  const frame = () => {
+    rafRef.current = null;
+    if (!draggingRef.current) return;
+    if (!anchorRef.current || !mouseRef.current) return null;
+
+    const dragRect = computeDragRect();
+    if (!dragRect) return;
+
+    const { x: x1, y: y1 } = anchorRef.current;
+    const { x: x2, y: y2 } = mouseRef.current;
+
+    setBox({
+      top: y1 - y2 >= 0 ? y2 : y1,
+      left: x1 - x2 >= 0 ? x2 : x1,
+      width: Math.abs(x1 - x2),
+      height: Math.abs(y1 - y2),
+    });
+
+    const side1 = x1 - x2 >= 0 ? "border-solid" : "border-dashed";
+    const side2 =
+      y1 - y2 >= 0
+        ? "border-green-300 bg-green-200/40"
+        : "border-blue-300 bg-blue-200/40";
+    setClasses({ side1, side2 });
+
+    // 현재 프레임의 선택 집합 계산
+    const next = new Set<string>();
+    for (const c of cellRectsRef.current) {
+      if (intersects(dragRect, c.rect)) next.add(c.id);
     }
+
+    // Diff 계산
+    const prev = prevSetRef.current;
+    // 빠른 탈출
+    if (prev.size === next.size) {
+      let same = true;
+      for (const id of next) {
+        if (!prev.has(id)) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return; // 변화 없음 → 스토어 업데이트 불필요
+    }
+
+    const toAdd: string[] = [];
+    const toRemove: string[] = [];
+    for (const id of next) if (!prev.has(id)) toAdd.push(id);
+    for (const id of prev) if (!next.has(id)) toRemove.push(id);
+
+    // 스토어 증분 반영 (선택 축소 시 자동 해제)
+    patchSelection({ add: toAdd, remove: toRemove });
+
+    // prev 갱신
+    prevSetRef.current = next;
+  };
+
+  const handleMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
+    if (isPressedKey("Shift")) return;
+    const contextMenu = (e.target as HTMLElement).closest?.(
+      "[data-radix-popper-content-wrapper]"
+    );
+    const sidebar = (e.target as HTMLElement).closest?.(
+      '[data-slot="sidebar"]'
+    );
+    if (e.button === 0 && !contextMenu && !sidebar) {
+      clearSelection();
+    }
+
+    // 필터링: 메인 영역 안일 때만
     const main = document.body.querySelector("main");
     if (!main?.contains(e.target as HTMLElement)) return;
-    clearSelectedCells();
-    setDragStart({ x: e.clientX, y: e.clientY });
-    setDragging(true);
-  });
-  const handleMouseDragMove = useEffectEvent((e: MouseEvent) => {
-    if (dragging) {
-      setDragMove({ x: e.clientX, y: e.clientY });
+
+    // 초기화
+
+    prevSetRef.current = new Set();
+
+    anchorRef.current = { x: e.clientX, y: e.clientY };
+    mouseRef.current = { x: e.clientX, y: e.clientY };
+    measureAllCells(); // 1회 측정
+    draggingRef.current = true;
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!draggingRef.current) return;
+    mouseRef.current = { x: e.clientX, y: e.clientY };
+    if (rafRef.current == null) {
+      rafRef.current = requestAnimationFrame(frame);
     }
-  });
-  const handleMouseDragEnd = useEffectEvent(() => {
-    setDragStart(null);
-    setDragMove(null);
-    setDragging(false);
-  });
+  };
+
+  const handleMouseUp = () => {
+    if (!draggingRef.current) return;
+
+    draggingRef.current = false;
+    anchorRef.current = null;
+    mouseRef.current = null;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    // 필요하면 여기서 최종 확정 이벤트 emit
+    setBox(null);
+  };
 
   useEffect(() => {
-    window.addEventListener("mousedown", handleMouseDragStart);
-    window.addEventListener("mousemove", handleMouseDragMove);
-    window.addEventListener("mouseup", handleMouseDragEnd);
+    window.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
     return () => {
-      window.removeEventListener("mousedown", handleMouseDragStart);
-      window.removeEventListener("mousemove", handleMouseDragMove);
-      window.removeEventListener("mouseup", handleMouseDragEnd);
+      window.removeEventListener("mousedown", handleMouseDown);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
     };
   }, []);
 
-  useEffect(() => {
-    const affectedCells = getAllCells();
-    if (moveX > 0 || moveY > 0) {
-      // 드래그 영역에 걸리는 테이블 내 셀 모두 선택 처리
-      // TODO: 구현
-      // 예시: 셀의 좌표(위치)정보를 받아오고, 드래그 영역 내에 포함된 셀의 id 목록을 선택 처리.
-      // - 현재 프로젝트의 state(store) 구조에 맞는 핸들러를 찾아서,
-      // - (예: useGanttStore에서 선택셀 업데이트 함수가 있다면)
-      // - 드래그된 영역(startX, startY ~ moveX, moveY)과 테이블의 셀 위치 정보를 비교하여
-      // - 해당 영역에 포함된 셀의 selected를 true로 변경 처리.
-      // 구현예시 (실제 셀 위치 정보 필요 시, useGanttStore의 head/body 데이터를 가져와서 반복):
-      // const affectedCells = ...; // 드래그 영역에 포함된 셀 id 리스트
-      // affectedCells.forEach(id => useGanttStore.getState().setSelectedCell(id, region));
-
-      // 드래그 영역 내에 포함된 셀의 selected를 true로, 나머지 false로 처리
-      const [x1, x2] = [startX, moveX].sort((a, b) => a - b);
-      const [y1, y2] = [startY, moveY].sort((a, b) => a - b);
-
-      affectedCells.forEach((cell) => {
-        const element = cell.element;
-        if (!element) return;
-        const rect = element.getBoundingClientRect();
-        // 셀의 중앙이 드래그 박스 안에 있으면 selected 처리
-        const cellXIn = x2 > rect.left && x1 < rect.right;
-        const cellYIn = y2 > rect.top && y1 < rect.bottom;
-        const isInDrag = cellXIn && cellYIn;
-        // selected 상태를 직접 업데이트 (store에)
-        setSelectCells(cell.id, isInDrag);
-      });
-    }
-  }, [moveX, moveY, startX, startY, dragMove]);
-
-  // height < 0일 때 solid, 아닐 때 dashed 보더 스타일 적용
-  const side1 = width >= 0 ? "border-solid" : "border-dashed";
-  // width < 0: 초록 테두리+배경, width >= 0: 파랑 테두리+배경
-  const side2 =
-    height >= 0
-      ? "border-green-300 bg-green-200/40" // 파스텔톤 초록 (tailwind green-300/200)
-      : "border-blue-300 bg-blue-200/40"; // 파스텔톤 파랑 (tailwind blue-300/200)
-
-  if (moveX === 0 && moveY === 0) return null;
-
   return (
-    <div className="fixed inset-0 z-50">
-      {dragging && (
+    <div>
+      {box && (
         <div
-          className={`absolute border-2 rounded-[2px] ${side1} ${side2}`}
+          className={`absolute border-2 rounded-[2px] ${classes.side1} ${classes.side2}`}
           style={{
-            top: height >= 0 ? startY : startY + height,
-            left: width >= 0 ? startX : startX + width,
-            width: Math.abs(moveX === 0 ? 0 : width),
-            height: Math.abs(moveY === 0 ? 0 : height),
+            top: box.top,
+            left: box.left,
+            width: box.width,
+            height: box.height,
           }}
         />
       )}

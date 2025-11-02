@@ -1,5 +1,5 @@
-import { useGanttStore } from "@/store/gantt.store";
-import { memo, useState } from "react";
+import { useGanttStore, type Sheet as SheetType } from "@/store/gantt.store";
+import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "../ui/button";
 import {
@@ -22,12 +22,50 @@ interface FooterProps {}
 const Footer: React.FC<FooterProps> = () => {
   const getSheetList = useGanttStore(useShallow((state) => state.getSheetList));
   const addNewSheet = useGanttStore((state) => state.addNewSheet);
+  const updateSheet = useGanttStore((state) => state.updateSheet);
   const removeSheet = useGanttStore((state) => state.removeSheet);
   const changeSheetIndex = useGanttStore((state) => state.changeSheetIndex);
+  const moveSheet = useGanttStore((state) => state.moveSheet);
   const currentSheetIndex = useGanttStore((state) => state.currentSheetIndex);
   const [newSheetTitle, setNewSheetTitle] = useState("");
   const [openAdd, setOpenAdd] = useState(false);
   const [contextOpenIndex, setContextOpenIndex] = useState<number | null>(null);
+  const [modalTitle, setModalTitle] = useState<string>("새 시트 추가");
+  const sheetIdRef = useRef<string | null>(null);
+
+  function handleRenameSheet(sheet: Pick<SheetType, "id" | "title">) {
+    setOpenAdd(true);
+    setModalTitle("이름 변경");
+    setNewSheetTitle(sheet.title);
+    sheetIdRef.current = sheet.id;
+  }
+
+  function handleDuplicateSheet(sheet: Pick<SheetType, "id" | "title">) {
+    const filtered = getSheetList().filter(
+      (s) => s.title.replace(/\(\d+\)/g, "").trim() === sheet.title
+    );
+    if (filtered.length > 0) {
+      addNewSheet(`${sheet.title} (${filtered.length + 1})`);
+    } else {
+      addNewSheet(sheet.title);
+    }
+    setNewSheetTitle("");
+    setOpenAdd(false);
+  }
+
+  // TODO: 이동 후 인덱스 변경 처리
+  function handleMoveSheet(
+    sheet: Pick<SheetType, "id" | "title">,
+    direction: "left" | "right"
+  ) {
+    if (direction === "left") {
+      moveSheet(sheet.id, "left");
+    } else {
+      moveSheet(sheet.id, "right");
+    }
+    setNewSheetTitle("");
+    setOpenAdd(false);
+  }
 
   return (
     <div>
@@ -59,11 +97,19 @@ const Footer: React.FC<FooterProps> = () => {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              <DropdownMenuItem>이름 변경</DropdownMenuItem>
-              <DropdownMenuItem>복제</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleRenameSheet(sheet)}>
+                이름 변경
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleDuplicateSheet(sheet)}>
+                복제
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>왼쪽으로 이동</DropdownMenuItem>
-              <DropdownMenuItem>오른쪽으로 이동</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleMoveSheet(sheet, "left")}>
+                왼쪽으로 이동
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleMoveSheet(sheet, "right")}>
+                오른쪽으로 이동
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
@@ -74,7 +120,16 @@ const Footer: React.FC<FooterProps> = () => {
             </DropdownMenuContent>
           </DropdownMenu>
         ))}
-        <Button size="sm" variant="outline" onClick={() => setOpenAdd(true)}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setOpenAdd(true);
+            sheetIdRef.current = null;
+            setModalTitle("새 시트 추가");
+            setNewSheetTitle("");
+          }}
+        >
           + 시트 추가
         </Button>
       </div>
@@ -86,7 +141,7 @@ const Footer: React.FC<FooterProps> = () => {
           className="mx-auto max-w-screen-sm rounded-b-md border-x"
         >
           <SheetHeader>
-            <SheetTitle>새 시트 추가</SheetTitle>
+            <SheetTitle>{modalTitle}</SheetTitle>
           </SheetHeader>
           <div className="px-4">
             <Input
@@ -98,19 +153,30 @@ const Footer: React.FC<FooterProps> = () => {
           </div>
           <SheetFooter>
             <div className="flex w-full justify-end gap-2">
-              <Button variant="outline" onClick={() => setOpenAdd(false)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setOpenAdd(false);
+                }}
+              >
                 취소
               </Button>
               <Button
                 onClick={() => {
                   const title = newSheetTitle.trim();
                   if (!title) return;
-                  addNewSheet(title);
+
+                  if (modalTitle === "이름 변경") {
+                    if (sheetIdRef.current)
+                      updateSheet(sheetIdRef.current, { title });
+                  } else {
+                    addNewSheet(title);
+                  }
                   setNewSheetTitle("");
                   setOpenAdd(false);
                 }}
               >
-                추가
+                {modalTitle === "이름 변경" ? "변경" : "추가"}
               </Button>
             </div>
           </SheetFooter>
@@ -126,4 +192,4 @@ const Footer: React.FC<FooterProps> = () => {
   );
 };
 
-export default memo(Footer);
+export default Footer;

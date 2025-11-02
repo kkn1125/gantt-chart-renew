@@ -11,8 +11,8 @@ import {
   MenubarTrigger,
 } from "@/components/ui/menubar";
 import { Separator } from "@/components/ui/separator";
+import { VERSION } from "@/config/variables";
 import { useGanttStore } from "@/store/gantt.store";
-import { memo } from "react";
 
 interface HeaderProps {}
 const Header: React.FC<HeaderProps> = () => {
@@ -25,7 +25,7 @@ const Header: React.FC<HeaderProps> = () => {
         <div className="flex items-center gap-2 font-semibold">
           <span className="text-lg">Gantt Chart</span>
           <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
-            v0.1.5
+            v{VERSION}
           </span>
         </div>
 
@@ -102,4 +102,4 @@ const Header: React.FC<HeaderProps> = () => {
   );
 };
 
-export default memo(Header);
+export default Header;
